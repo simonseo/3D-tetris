@@ -11,6 +11,8 @@ int pushed = 0;
 int level = 7;
 int select = 1;
 
+int timme = 0;
+
 int data = 0;
 int index[40]; // ------------------------------------------ [문제 없음]
 
@@ -37,18 +39,25 @@ int shiftClock[3] = { redClock, greenClock, blueClock };
 // --------------------------------------------------------- [cathode]
 int layerPin[6] = { 2, 3, 4, 5, 6, 7 };
 
-byte grid[5];
+byte grid[6][5];
 boolean play = false;
+boolean stack2 = false;
 
 // 5*5 이미지
 // byte 1:off  0:On
 
 byte glow[5] = {
-  B11100000,
-  B11100000,
-  B11100000,
-  B11100000,
-  B11100000
+//  B11100000,
+//  B11100000,
+//  B11100000,
+//  B11100000,
+//  B11100000
+  B00000000,
+  B00000000,
+  B00000000,
+  B00000000,
+  B00000000
+  
 };
 
 byte pat[] = {
@@ -124,6 +133,8 @@ void setup() {
 // 계속 실행할 무한 루프
 void loop() {
 
+  timme += 1;
+  
   int new_button = digitalRead(buttonPin); // ---------------- 버튼 읽기
 
   if (new_button > 0 && old_button != 1 && level == 7)
@@ -180,20 +191,28 @@ void loop() {
   Serial.println(select);
 
   for (int i = 0; i < 5; i++) {
-    grid[i] |=  ~(pat[((index[data]) * 5) + i]);
-    Serial.println(grid[i], BIN);
+    grid[0][i] |=  ~(pat[((index[data]) * 5) + i]);
+    Serial.println(grid[0][i], BIN);
 
-    if ( level == 7 && grid[0] == pat[0] && grid[1] == pat[1] && grid[2] == pat[2] && grid[3] == pat[3] && grid[4] == pat[4] ) {
-      grid[0] = glow[0];
-      grid[1] = glow[1];
-      grid[2] = glow[2];
-      grid[3] = glow[3];
-      grid[4] = glow[4];
+    if ( level == 7
+        && grid[0][0] == pat[0]
+        && grid[0][1] == pat[1]
+        && grid[0][2] == pat[2]
+        && grid[0][3] == pat[3]
+        && grid[0][4] == pat[4] ) {
+      for (int n = 0; n < 5; n++) {
+        grid[0][n] = glow[n];
+        for (int m = 0; m < 5; m++) {
+          grid[n][m] = grid[n + 1][m];
+        }
+      }
       for (int j = 0; j < data; j++) {
         index[j] = 0;
       }
       data = 0;
       updateShiftRegisterAnode(level);
+    } else {
+      
     }
   }
 }
@@ -203,9 +222,27 @@ void gridPattern() {
     if ( level != 1 && level < 7) {
       int shape = (select * 5) + i;
       if (select == 1) {
+        if(timme%4==0){
         shiftOut(redData, redClock, LSBFIRST, pat[shape] );
         shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
         shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
+        }
+        if(timme%4==1){
+        shiftOut(redData, redClock, LSBFIRST, pat[i] );
+        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
+        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
+        }
+        if(timme%4==2){
+        shiftOut(redData, redClock, LSBFIRST, pat[i] );
+        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
+        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
+        }
+        if(timme%4==3){
+        shiftOut(redData, redClock, LSBFIRST, pat[i] );
+        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
+        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
+        }
+        
       } else if (select == 2) {
         shiftOut(redData, redClock, LSBFIRST, pat[shape] );
         shiftOut(greenData, greenClock, LSBFIRST, pat[shape] );
@@ -233,8 +270,8 @@ void gridPattern() {
       }
     } else {
       // ------------------------------------------ bitAnd = & , bitOr = |, bitNor = ^, bitNot = ~
-      shiftOut(redData, redClock, LSBFIRST, ~(grid[i]));
-      shiftOut(greenData, greenClock, LSBFIRST, ~(grid[i]));
+      shiftOut(redData, redClock, LSBFIRST, ~(grid[0][i]));
+      shiftOut(greenData, greenClock, LSBFIRST, ~(grid[0][i]));
       shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
     }
   }
@@ -275,26 +312,32 @@ void updateShiftRegisterAnode(int layer) {
 
     if (play) { // ---------------------------------- play = 1층 모니터용으로 그냥 만든 것
       digitalWrite(layerPin[0],  HIGH);
+      digitalWrite(layerPin[1],  HIGH);
+      digitalWrite(layerPin[2],  HIGH);
+      digitalWrite(layerPin[3],  HIGH);
+      digitalWrite(layerPin[4],  HIGH);
+      digitalWrite(layerPin[5],  HIGH);
+      
 
       switch (layer) {
-        case 1:
-          digitalWrite(layerPin[0],  HIGH);
-          break;
-        case 2:
-          digitalWrite(layerPin[1],  HIGH);
-          break;
-        case 3:
-          digitalWrite(layerPin[2],  HIGH);
-          break;
-        case 4:
-          digitalWrite(layerPin[3],  HIGH);
-          break;
-        case 5:
-          digitalWrite(layerPin[4],  HIGH);
-          break;
-        case 6:
-          digitalWrite(layerPin[5],  HIGH);
-          break;
+//        case 1:
+//          digitalWrite(layerPin[0],  HIGH);
+//          break;
+//        case 2:
+//          digitalWrite(layerPin[1],  HIGH);
+//          break;
+//        case 3:
+//          digitalWrite(layerPin[2],  HIGH);
+//          break;
+//        case 4:
+//          digitalWrite(layerPin[3],  HIGH);
+//          break;
+//        case 5:
+//          digitalWrite(layerPin[4],  HIGH);
+//          break;
+//        case 6:
+//          digitalWrite(layerPin[5],  HIGH);
+//          break;
         case 7:
           for (int i = 0; i < 6; i++) {
             // -------------------------------------------------------- [ LED OFF ]
