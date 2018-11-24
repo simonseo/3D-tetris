@@ -1,350 +1,453 @@
-#include <FirmataDefines.h>
-#include <FirmataConstants.h>
-#include <Boards.h>
-#include <Firmata.h>
-#include <FirmataMarshaller.h>
-#include <FirmataParser.h>
+//=== BASIC OPERATIONS ===
 
-int buttonPin = 13;
-int old_button ;
-int pushed = 0;
-int level = 7;
-int select = 1;
+void TurnOnLayer(int8_t z)
+{
+  int8_t prev = z == 0 ? 7 : z - 1;
 
-int timme = 0;
+  // Prepare for data. Shift data to shift registers but do not reflect it on the outputs yet.
+  digitalWrite(latchPin, LOW);
 
-int data = 0;
-int index[40]; // ------------------------------------------ [문제 없음]
+  //-- Spit out the bits --
+  DrawLayer(z);
 
-// ---------------------------------------------------------- [anode]
-// RED
-int redData = 9;
-int redLatch = 10;
-int redClock = 11;
+  //-- Turn off previous layer --
+  digitalWrite(2 + prev, LOW); // Turn off prev layer
+}
 
-//GREEN
-int greenData = A3;  // DATA
-int greenLatch = A4; // STCP
-int greenClock = A5; // SHCP
+void TurnOffLayer(int8_t z)
+{
+  // All data ready. Instantly reflect all 64 bits on all 8 shift registers to the led layer.
+  digitalWrite(latchPin, HIGH);
 
-//BLUE
-int blueData = A0;
-int blueLatch = A1;
-int blueClock = A2;
+  //-- Turn on this layer --
+  digitalWrite(2 + z, HIGH); // Turn on this layer
+}
 
-int shiftData[3] = { redData, greenData, blueData };
-int shiftLatch[3] = { redLatch, greenLatch, blueLatch };
-int shiftClock[3] = { redClock, greenClock, blueClock };
-
-// --------------------------------------------------------- [cathode]
-int layerPin[6] = { 2, 3, 4, 5, 6, 7 };
-
-byte grid[6][5];
-boolean play = false;
-boolean stack2 = false;
-
-// 5*5 이미지
-// byte 1:off  0:On
-
-byte glow[5] = {
-//  B11100000,
-//  B11100000,
-//  B11100000,
-//  B11100000,
-//  B11100000
-  B00000000,
-  B00000000,
-  B00000000,
-  B00000000,
-  B00000000
-  
-};
-
-byte pat[] = {
-  B11111111,
-  B11111111,
-  B11111111,
-  B11111111,
-  B11111111,
-
-  B00001,
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-
-  B11111,
-  B10001,
-  B11101,
-  B11111,
-  B11111,
-
-  B11111,
-  B01111,
-  B00011,
-  B01111,
-  B11111,
-
-  B11110,
-  B11110,
-  B11110,
-  B11110,
-  B11111,
-
-  B11111,
-  B11111,
-  B11111,
-  B10011,
-  B00111,
-
-  B11111,
-  B11111,
-  B10001,
-  B11101,
-  B11111,
-
-  B11111,
-  B11111,
-  B11111,
-  B11111,
-  B11000
-};
-
-void setup() {
-  Serial.begin(9600); // --------------------------------- 시리얼 통신 초기화
-
-  pinMode(buttonPin, INPUT); // --------------------------- PUSH BUTTON
-
-  for (int i = 0; i < 6; i++) {
-    pinMode(layerPin[i], OUTPUT); // ---------------------- 각 층별 핀 설정
+void DrawLayer(int8_t z)
+{
+  // Spit out all 64 bits for the layer.
+  for (int8_t y = 0; y < 8; y++) {
+    shiftOut(dataPin, clockPin, MSBFIRST, ~cube[y][z]); // Push Most significant BYTE first
   }
+}
 
-  for (int i = 0; i < 3; i++) {
-    pinMode(shiftData[i], OUTPUT);
-    pinMode(shiftLatch[i], OUTPUT);
-    pinMode(shiftClock[i], OUTPUT);
+void LayerOn(int8_t z)
+{
+  for (int8_t y = 0; y < 8; y++) {
+    for (int8_t x = 0; x < 8; x++) {
+      SetDot(x, y, z);
+    }
   }
+}
 
-  updateShiftRegisterAnode(7);
-  updateShiftRegisterCathode(play);
+void SetXPlane(int8_t x)
+{
+  x = Wrap(x);
+  int8_t xPattern = 1 << x;
+  for (int8_t z = 0; z < 8; z++) {
+    for (int8_t y = 0; y < 8; y++) {
+      cube[y][z] = xPattern;
+    }
+  }
+}
+
+void One_Pixel_Up_a_wall(int8_t y)
+{
+  for (int8_t z = 0; z < 8; z++) {
+    for (int8_t x = 7; x >= 0; x--) {
+      SetDot(x, y, z);
+      delay(64);
+      ClearDot(x, y, z);
+    }
+  }
+}
+
+void Line_Up_a_wall(int8_t y)
+{
+  for (int8_t z = 0; z < 8; z++) {
+    for (int8_t x = 7; x >= 0; x--) {
+      SetDot(x, y, z);
+    }
+    delay(64);
+    CubeAllOff();
+  }
+}
+
+void FillLayerLeftToRight(int8_t z)
+{
+  for (int8_t x = 0; x < 8; x++) {
+    for (int8_t y = 0; y < 8; y++) {
+      SetDot(x, y, z);
+    }
+    delay(64);
+  }
+}
+
+void FillWallDownUp(int8_t x)
+{
+  for (int8_t z = 0; z < 8; z++) {
+    for (int8_t y = 0; y < 8; y++) {
+      SetDot(x, y, z);
+    }
+    delay(64);
+  }
 }
 
 
-// 계속 실행할 무한 루프
-void loop() {
+void FillLayerRightLeft(int8_t z)
+{
+  for (int8_t x = 7; x >= 0; x--) {
+    for (int8_t y = 0; y < 8; y++) {
+      SetDot(x, y, z);
+    }
+    delay(64);
+  }
+}
 
-  timme += 1;
-  
-  int new_button = digitalRead(buttonPin); // ---------------- 버튼 읽기
+void DropOneCenterLine(int8_t x)
+{
+  for (int8_t z = 7; z >= 0; z--) {
+    SetDot(x, 3, z);
+    SetDot(x, 4, z);
+    delay(64);
+  }
+}
 
-  if (new_button > 0 && old_button != 1 && level == 7)
+void FillWallFromCenter(int8_t x)
+{
+  for (int8_t y = 1; y < 4; y++) {
+    for (int8_t z = 0; z < 8; z++) {
+      SetDot(x, 3 - y, z);
+      SetDot(x, 4 + y, z);
+    }
+    delay(64);
+  }
+}
+
+void PinWheel(int8_t y)
+{
+  for (int8_t n = 0; n < 8; n++)
   {
-    pushed += 1;
-    if (pushed > 1)
-      pushed = 0; // ---------------------------------------- 버튼 활성화
+    DrawLine3D(0, y, n, 7, y, 7 - n);
+    delay(64);
   }
-  old_button = new_button;
-  Serial.print(old_button);
-  Serial.print(", ");
 
-  if (pushed == 1) {
-    play = true;
-    Serial.print(" Pushed,  ");
+  for (int8_t n = 0; n < 8; n++)
+  {
+    DrawLine3D(n, y, 7, 7 - n, y, 0);
+    delay(64);
+  }
+}
 
-    level -= 1;
-    if (level < 1) {
-      level = 1;
+void DrawCircle(int8_t z)
+{
+  for (int8_t n = 0; n < 20; n++)
+  {
+    SetDot(circle[n][0], circle[n][1], z);
+    delay(128);
+  }
+}
+
+void FillFrontAndBackRightLeft()
+{
+  for (int8_t x = 0; x < 8; x++) {
+    for (int8_t z = 0; z < 8; z++) {
+      SetDot(x, 0, z);
+      SetDot(x, 7, z);
     }
-    select += 0; // ----------------------------------- select = 선택된 도형 번호
-    int tmp = select;
-    index[data] = tmp;
+    delay(64);
+  }
+}
 
-    updateShiftRegisterAnode(level); // -------------------- LED 켜지는 층
-    updateShiftRegisterCathode(play);
+void CubeShrink()
+{
+  int8_t cubeSize = 5;
+  for (int8_t n = 1; n < 4; n++) {
+    CubeAllOff();
+    DrawRect(n, n, n, n, n + cubeSize, n + cubeSize); // YZ plane
+    DrawRect(7 - n, n, n, 7 - n, n + cubeSize, n + cubeSize); // YZ plane
+    DrawRect(n, n, n, n + cubeSize, n + cubeSize, n); // XY plane
+    DrawRect(n, n, 7 - n, n + cubeSize, n + cubeSize, 7 - n); // XY plane
+    cubeSize -= 2;
+    delay(128);
+  }
+}
 
-  } else if (pushed == 0) {
-    Serial.print("unPushed, ");
-    select += 1;
-    if (select > 7) {
-      select = 1;
+void CubeAllOn()
+{
+  //noInterrupts();
+  for (int8_t z = 0; z < 8; z++) {
+    for (int8_t y = 0; y < 8; y++) {
+      for (int8_t x = 0; x < 8; x++) {
+        SetDot(x, y, z);
+      }
     }
   }
+  //interrupts();
+}
 
-  if (level == 1) {
-    pushed = 0; // ------------------------------------------ 버튼 활성화
-    level = 9;
-  } else if (level == 9) {
-    data++;
-    level = 7;
-
+void CubeAllOff()
+{
+  for (int8_t z = 0; z < 8; z++) {
+    SetLayer(z, 0x00);
   }
-  Serial.print("[");
-  Serial.print(data); // --------------------------------- 저장되는 데이터 갯수
-  Serial.print("] : ");
-  for (int i = 0; i <= data; i++) {
-    Serial.print(index[i]); // ---------------------------- 저장된 도형 번호
-    Serial.print(", ");
-  }
-  Serial.print(" current level is... ");
-  Serial.print(level);
-  Serial.print(", random selection... : ");
-  Serial.println(select);
+}
 
-  for (int i = 0; i < 5; i++) {
-    grid[0][i] |=  ~(pat[((index[data]) * 5) + i]);
-    Serial.println(grid[0][i], BIN);
+//=== SHAPES ===
 
-    if ( level == 7
-        && grid[0][0] == pat[0]
-        && grid[0][1] == pat[1]
-        && grid[0][2] == pat[2]
-        && grid[0][3] == pat[3]
-        && grid[0][4] == pat[4] ) {
-      for (int n = 0; n < 5; n++) {
-        grid[0][n] = glow[n];
-        for (int m = 0; m < 5; m++) {
-          grid[n][m] = grid[n + 1][m];
+void Rain()
+{
+  //-- Draw plane --
+  DrawRect(0, 0, 6,  5, 5, 6 ); // Draw top plane (x, y, z, x, y, z) = (시, 작, 점, 최, 종, 점)
+
+  //-- Create an array of those pixels --
+  int8_t plane[8][8] ;// z position of each dot on the plane = 평면 위 각 점들의 z포지션  ?
+  for (int8_t x = 0; x < 8; x++)
+    for (int8_t y = 0; y < 8; y++) {
+      plane[x][y] = 6;
+    }
+
+  int8_t floorCount = 0;
+  while (floorCount < 25) // x * y
+  {
+    //-- Pick a random dot on the plane to start moving --
+    boolean found = false;
+    byte tryCount = 0;
+    while (!found && tryCount++ < 20) {
+      int8_t x = random(3, 8);
+      //      for (int8_t x = 3; x < 8; x++) {
+      int8_t y = random(3, 8);
+      //      for (int8_t y = 3; y < 8; y++) {
+      int8_t z = plane[x][y];
+      if (z == 6) {
+        ClearDot(x, y, 6);
+        plane[x][y]--;
+        found = true;
+      }
+      //      } // for y
+      //      } // for x
+    }
+
+    //-- Fly pixels \that is no longer on plane to opposite side
+    floorCount = 0;
+    for (int8_t x = 3; x < 8; x++)
+    {
+      for (int8_t y = 3; y < 8; y++) {
+        int8_t z = plane[x][y];
+        if (z < 6 && z > 0) {
+          ClearDot(x, y, z);
+          z--;
+          SetDot(x, y, z);
+          plane[x][y] = z;
         }
+
+        if (z == 0)  // if (plane[x][y] == 0)
+          floorCount++;
+        Serial.println(floorCount);
       }
-      for (int j = 0; j < data; j++) {
-        index[j] = 0;
-      }
-      data = 0;
-      updateShiftRegisterAnode(level);
-    } else {
-      
+    }
+    delay(64);
+  }
+
+  delay(500);
+  EraseRect(3, 3, 0, 7, 7, 0);
+}
+
+
+void Shape_L2(int z) {
+  DrawLine3D(5, 4, z, 7, 4, z);
+  DrawLine3D(7, 4, z, 7, 5, z);
+}
+
+void Shape_L1(int z) {
+  DrawLine3D(5, 5, z, 5, 7, z);
+  DrawLine3D(5, 7, z, 6, 7, z);
+}
+
+void Shape_I(int z) {
+  DrawLine3D(4, 3, z, 7, 3, z);
+}
+
+void Shape_S2(int z) {
+  DrawLine3D(4, 5, z, 4, 6, z);
+  DrawLine3D(3, 6, z, 3, 7, z);
+}
+
+void Shape_S1(int z) {
+  DrawLine3D(6, 5, z, 6, 6, z);
+  DrawLine3D(7, 6, z, 7, 7, z);
+}
+
+void Shape_T(int z) {
+  DrawLine3D(3, 3, z, 3, 5, z);
+  DrawLine3D(3, 4, z, 4, 4, z);
+}
+
+void Shape_o(int z) {
+  SetDot(4, 7, z);
+}
+
+void SelectShape(int tmp, int z) {
+  if (tmp == 0) {
+    Shape_T(z);
+  } else if (tmp == 1) {
+    Shape_L2(z);
+  } else if (tmp == 2) {
+    Shape_L1(z);
+  } else if (tmp == 3) {
+    Shape_I(z);
+  } else if (tmp == 4) {
+    Shape_S2(z);
+  } else if (tmp == 5) {
+    Shape_S1(z);
+  } else if (tmp == 6) {
+    Shape_o(z);
+  }
+
+}
+
+void E_Shape_L2(int z) {
+  EraseLine3D(5, 4, z, 7, 4, z);
+  EraseLine3D(7, 4, z, 7, 5, z);
+}
+
+void E_Shape_L1(int z) {
+  EraseLine3D(5, 5, z, 5, 7, z);
+  EraseLine3D(5, 7, z, 6, 7, z);
+}
+
+void E_Shape_I(int z) {
+  EraseLine3D(4, 3, z, 7, 3, z);
+}
+
+void E_Shape_S2(int z) {
+  EraseLine3D(4, 5, z, 4, 6, z);
+  EraseLine3D(3, 6, z, 3, 7, z);
+}
+
+void E_Shape_S1(int z) {
+  EraseLine3D(6, 5, z, 6, 6, z);
+  EraseLine3D(7, 6, z, 7, 7, z);
+}
+
+void E_Shape_T(int z) {
+  EraseLine3D(3, 3, z, 3, 5, z);
+  EraseLine3D(3, 4, z, 4, 4, z);
+}
+
+void E_Shape_o(int z) {
+  ClearDot(4, 7, z);
+}
+
+void EraseShape(int tmp, int z) {
+  if (tmp == 0) {
+    E_Shape_T(z);
+  } else if (tmp == 1) {
+    E_Shape_L2(z);
+  } else if (tmp == 2) {
+    E_Shape_L1(z);
+  }  else if (tmp == 3) {
+    E_Shape_I(z);
+  } else if (tmp == 4) {
+    E_Shape_S2(z);
+  } else if (tmp == 5) {
+    E_Shape_S1(z);
+  } else if (tmp == 6) {
+    E_Shape_o(z);
+  }
+}
+void SetDot(int8_t x,int8_t y, int8_t z)
+{
+  bitSet(cube[y][z], x);
+  if (x >= 3 && y >= 3 && z < 6) { // grid 내부에 있는 점이면 grid의 값도 바꿔줌
+    grid[x-3][y-3][z] = 1;
+  }
+  if (slomo) delay(64);
+}
+
+void ClearDot(int8_t x,int8_t y,int8_t z)
+{
+  bitClear(cube[y][z], x);
+  if (x >= 3 && y >= 3 && z < 6) {
+    grid[x-3][y-3][z] = 0;
+  }
+}
+
+void SetLayer(int8_t z, int8_t xByte)
+{
+  for (int8_t y=0; y<8; y++) {
+    cube[y][z] = xByte;
+    for (int8_t x=0; x<8; x++) {
+      if (xByte==0) ClearDot(x,y,z); else SetDot(x,y,z);
     }
   }
 }
 
-void gridPattern() {
-  for (int i = 0; i < 5; i++) {
-    if ( level != 1 && level < 7) {
-      int shape = (select * 5) + i;
-      if (select == 1) {
-        if(timme%4==0){
-        shiftOut(redData, redClock, LSBFIRST, pat[shape] );
-        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
-        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
-        }
-        if(timme%4==1){
-        shiftOut(redData, redClock, LSBFIRST, pat[i] );
-        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
-        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
-        }
-        if(timme%4==2){
-        shiftOut(redData, redClock, LSBFIRST, pat[i] );
-        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
-        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
-        }
-        if(timme%4==3){
-        shiftOut(redData, redClock, LSBFIRST, pat[i] );
-        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
-        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
-        }
-        
-      } else if (select == 2) {
-        shiftOut(redData, redClock, LSBFIRST, pat[shape] );
-        shiftOut(greenData, greenClock, LSBFIRST, pat[shape] );
-        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
-      } else if (select == 3) {
-        shiftOut(redData, redClock, LSBFIRST, pat[i]);
-        shiftOut(greenData, greenClock, LSBFIRST, pat[shape] );
-        shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
-      } else if (select == 4) {
-        shiftOut(redData, redClock, LSBFIRST, pat[i]);
-        shiftOut(greenData, greenClock, LSBFIRST, pat[shape] );
-        shiftOut(blueData, blueClock, LSBFIRST, pat[shape] );
-      } else if (select == 5) {
-        shiftOut(redData, redClock, LSBFIRST, pat[i]);
-        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
-        shiftOut(blueData, blueClock, LSBFIRST, pat[shape] );
-      } else if (select == 6) {
-        shiftOut(redData, redClock, LSBFIRST, pat[shape] );
-        shiftOut(greenData, greenClock, LSBFIRST, pat[i]);
-        shiftOut(blueData, blueClock, LSBFIRST, pat[shape] );
-      } else if (select == 7) {
-        shiftOut(redData, redClock, LSBFIRST, pat[shape] );
-        shiftOut(greenData, greenClock, LSBFIRST, pat[shape] );
-        shiftOut(blueData, blueClock, LSBFIRST, pat[shape] );
-      }
-    } else {
-      // ------------------------------------------ bitAnd = & , bitOr = |, bitNor = ^, bitNot = ~
-      shiftOut(redData, redClock, LSBFIRST, ~(grid[0][i]));
-      shiftOut(greenData, greenClock, LSBFIRST, ~(grid[0][i]));
-      shiftOut(blueData, blueClock, LSBFIRST, pat[i]);
+boolean LayerIsFull(int z) {
+  // grid[x][y][z] 값이 1이면 켜져있음, 값이 0이면 꺼져있음
+  for (int x = 0; x < 5; x++) {
+    for (int y = 0; y < 5; y++) {
+      if (grid[x][y][z] != 1) return false; // z층에 한칸이라도 꺼져있으면 꽉차있지 않음
     }
   }
+  return true; // z층 한 집씩 봤는데 전부 켜져있으면 꽉차있음
 }
 
-void patternV() {
-  // -------------------------------------------------------- [ LED OFF ]
-  for (int i = 0; i < 5; i++) {
-    shiftOut(redData, redClock, LSBFIRST, B11111111);
-    shiftOut(greenData, greenClock, LSBFIRST, B11111111);
-    shiftOut(blueData, blueClock, LSBFIRST, B11111111);
-  }
-}
-
-// ------------------------------------------------- 패턴 cathode LOW일 때 켜짐 (-)
-void updateShiftRegisterCathode(boolean pattern) {
-  digitalWrite(redLatch,  LOW);
-  digitalWrite(greenLatch,  LOW);
-  digitalWrite(blueLatch,  LOW);
-
-  if (pattern) {
-    gridPattern();
-  }
-  else {
-    // -------------------------------------------------------- [ LED OFF ]
-    patternV();
-  }
-  digitalWrite(redLatch,  HIGH);
-  digitalWrite(greenLatch,  HIGH);
-  digitalWrite(blueLatch,  HIGH);
-}
-
-// -------------------------------------------------------- 각 층(layer)
-void updateShiftRegisterAnode(int layer) {
-  for (int i = 0; i < 6; i++) {
-    digitalWrite(layerPin[i],  LOW); // ------------ 레이어 anode HIGH일 때 켜짐 (+)
-    delay(1);
-
-    if (play) { // ---------------------------------- play = 1층 모니터용으로 그냥 만든 것
-      digitalWrite(layerPin[0],  HIGH);
-      digitalWrite(layerPin[1],  HIGH);
-      digitalWrite(layerPin[2],  HIGH);
-      digitalWrite(layerPin[3],  HIGH);
-      digitalWrite(layerPin[4],  HIGH);
-      digitalWrite(layerPin[5],  HIGH);
-      
-
-      switch (layer) {
-//        case 1:
-//          digitalWrite(layerPin[0],  HIGH);
-//          break;
-//        case 2:
-//          digitalWrite(layerPin[1],  HIGH);
-//          break;
-//        case 3:
-//          digitalWrite(layerPin[2],  HIGH);
-//          break;
-//        case 4:
-//          digitalWrite(layerPin[3],  HIGH);
-//          break;
-//        case 5:
-//          digitalWrite(layerPin[4],  HIGH);
-//          break;
-//        case 6:
-//          digitalWrite(layerPin[5],  HIGH);
-//          break;
-        case 7:
-          for (int i = 0; i < 6; i++) {
-            // -------------------------------------------------------- [ LED OFF ]
-            digitalWrite(layerPin[i],  LOW);
-          }
-          break;
+void ShiftLayers(int z) {
+  // z층부터 한층씩 올라가면서 윗층 값을 복사
+  for (; z < 6-1; z++) { // 꼭대기-1층까지 한층씩 올라감. (꼭대기 층은 윗집이 없으니까)
+    for (int x = 0; x < 5; x++) {
+      for (int y = 0; y < 5; y++) {
+        if (grid[x][y][z+1] == 1) SetDotWrap(x,y,z); // 윗집 불이 켜져있으면 우리집 불 켬
+        else if (grid[x][y][z+1] == 0) ClearDotWrap(x,y,z); // 윗집 불 꺼져있으면 우리집 불 끔
       }
     }
   }
+  SetLayer(5, 0x00); // 꼭대기인 6층은 불을 다 끔
+}
+
+
+void DropShapes(boolean pushed, int selected) {
+
+  if (pushed) {
+    delay(200);
+
+    for (int8_t z = 5; z >= cnt[selected]; z--) { // 해당 도형의 현재 로컬 레벨까지만 떨어짐
+      if (z < 5) EraseShape(selected, z+1);   // 그린 후 지우면서 한 줄씩 내려감
+      SelectShape(selected, z);   // 해당 층에 도형 그리고
+      delay(5);
+    }
+    cnt[selected]++;
+    delay(100);
+  }
+
+  // 방금 떨어진 도형이 멈춘 층이 꽉 찼는지 확인.
+  // cnt[selected]는 위에서 ++해서 무조건 1 이상이기 때문에 -1 해도 0 이상
+  if (LayerIsFull(cnt[selected] - 1)) {  
+    SetLayer(cnt[selected] - 1, 0x00); // 해당 층을 전부 지우고 SetLayer(z, 0x00);
+    ShiftLayers(cnt[selected] - 1) // 해당 층 이상을 전부 한칸씩 떨어뜨림
+    for (int k = 0; k < 7; k++) {
+      cnt[k]--;
+    }
+  }
+
+  // 5층이 넘어가면 Re-start
+  if (cnt[selected] >= 5) {
+    CubeAllOn();
+    delay(300);
+    CubeAllOff();  // 전체를 우선 다 끈 후
+    delay(200);
+    CubeAllOn();
+    delay(300);
+    CubeAllOff();
+    delay(200);
+    CubeAllOn();
+    delay(300);
+    CubeAllOff();
+    for (int k = 0; k < 7; k++) {
+      cnt[k] = 0;   // 도형별 누적 층수 초기화
+    }
+  }
+
+  delay(100);
 }
